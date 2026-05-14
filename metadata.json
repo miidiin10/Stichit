@@ -1,0 +1,8 @@
+{
+  "name": "Stitchit",
+  "description": "Connects people with tailors for custom-fitted clothing. Features include profiles, tailor portfolios, messaging, scheduling, order tracking, and payments.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

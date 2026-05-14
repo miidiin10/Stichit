@@ -1,0 +1,172 @@
+{
+  "entities": {
+    "PublicProfile": {
+      "title": "Public Profile",
+      "description": "Publicly visible information for a user (Client or Tailor)",
+      "type": "object",
+      "properties": {
+        "role": {
+          "type": "string",
+          "enum": ["client", "tailor"]
+        },
+        "displayName": {
+          "type": "string",
+          "description": "User's full name or business name"
+        },
+        "bio": {
+          "type": "string"
+        },
+        "avatarUrl": {
+          "type": "string"
+        },
+        "portfolioUrls": {
+          "type": "array",
+          "description": "Images of previous work (tailors only)"
+        },
+        "services": {
+          "type": "array",
+          "description": "List of offered services (tailors only)"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": ["role", "displayName", "createdAt", "updatedAt"]
+    },
+    "PrivateInfo": {
+      "title": "Private Information",
+      "description": "PII that should be restricted to the owner",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string"
+        },
+        "phone": {
+          "type": "string"
+        },
+        "address": {
+          "type": "string"
+        }
+      },
+      "required": ["email"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "A custom clothing request/order between a client and a tailor",
+      "type": "object",
+      "properties": {
+        "clientId": {
+          "type": "string"
+        },
+        "tailorId": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "accepted", "in_progress", "fitting", "completed", "cancelled"]
+        },
+        "price": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": ["clientId", "tailorId", "description", "status", "createdAt", "updatedAt"]
+    },
+    "Chat": {
+      "title": "Chat",
+      "description": "A conversation between a client and a tailor",
+      "type": "object",
+      "properties": {
+        "participants": {
+          "type": "array",
+          "description": "Array containing two user IDs (client and tailor)"
+        },
+        "orderId": {
+          "type": "string",
+          "description": "Optional order reference"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": ["participants", "updatedAt"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "A single message in a chat",
+      "type": "object",
+      "properties": {
+        "senderId": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        }
+      },
+      "required": ["senderId", "text", "createdAt"]
+    },
+    "Review": {
+      "title": "Review",
+      "description": "A review leftover by a client for a tailor",
+      "type": "object",
+      "properties": {
+        "clientId": {
+          "type": "string"
+        },
+        "tailorId": {
+          "type": "string"
+        },
+        "rating": {
+          "type": "number"
+        },
+        "comment": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        }
+      },
+      "required": ["clientId", "tailorId", "rating", "comment", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/profiles/main": {
+      "schema": "PublicProfile",
+      "description": "Public directory and profile info"
+    },
+    "/users/{userId}/private/info": {
+      "schema": "PrivateInfo",
+      "description": "Isolated PII (email, phone, address)"
+    },
+    "/orders/{orderId}": {
+      "schema": "Order",
+      "description": "Top-level collection for orders"
+    },
+    "/chats/{chatId}": {
+      "schema": "Chat",
+      "description": "Top-level chat collection tracking participants"
+    },
+    "/chats/{chatId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Messages belonging to a chat"
+    },
+    "/reviews/{reviewId}": {
+      "schema": "Review",
+      "description": "Reviews on tailors"
+    }
+  }
+}

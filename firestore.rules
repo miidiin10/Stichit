@@ -1,0 +1,180 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Phase 0: Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Phase 3: Primitives
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isSignedIn() { return request.auth != null; }
+    
+    // Validations (Phase 2 blueprints)
+    function isValidPublicProfile(data) {
+      return data.keys().hasOnly(['role', 'displayName', 'bio', 'avatarUrl', 'portfolioUrls', 'services', 'createdAt', 'updatedAt'])
+        && data.role in ['client', 'tailor']
+        && data.displayName is string && data.displayName.size() > 0 && data.displayName.size() <= 64
+        && data.get('bio', '') is string && data.get('bio', '').size() <= 500
+        && data.get('avatarUrl', '') is string && data.get('avatarUrl', '').size() <= 1024
+        && data.get('portfolioUrls', []) is list && data.get('portfolioUrls', []).size() <= 20
+        && data.get('services', []) is list && data.get('services', []).size() <= 20
+        && data.get('createdAt', request.time) == request.time
+        && data.get('updatedAt', request.time) == request.time;
+    }
+
+    function isValidPrivateInfo(data) {
+      return data.keys().hasOnly(['email', 'phone', 'address'])
+        && data.email is string && data.email.size() <= 256
+        && data.get('phone', '') is string && data.get('phone', '').size() <= 32
+        && data.get('address', '') is string && data.get('address', '').size() <= 512;
+    }
+
+    function isValidOrder(data) {
+      return data.keys().hasOnly(['clientId', 'tailorId', 'description', 'status', 'price', 'createdAt', 'updatedAt'])
+        && isValidId(data.clientId)
+        && isValidId(data.tailorId)
+        && data.description is string && data.description.size() <= 2000
+        && data.status in ['pending', 'accepted', 'in_progress', 'fitting', 'completed', 'cancelled']
+        && (data.get('price', 0) is number)
+        && data.get('createdAt', request.time) == request.time
+        && data.get('updatedAt', request.time) == request.time;
+    }
+
+    function isValidChat(data) {
+      return data.keys().hasOnly(['participants', 'orderId', 'updatedAt'])
+        && data.participants is list && data.participants.size() == 2
+        && data.participants[0] is string && data.participants[1] is string
+        && data.get('orderId', 'none') is string && data.get('orderId', 'none').size() <= 128
+        && data.get('updatedAt', request.time) == request.time;
+    }
+
+    function isValidMessage(data) {
+      return data.keys().hasOnly(['senderId', 'text', 'createdAt'])
+        && isValidId(data.senderId)
+        && data.text is string && data.text.size() > 0 && data.text.size() <= 1000
+        && data.get('createdAt', request.time) == request.time;
+    }
+
+    function isValidReview(data) {
+      return data.keys().hasOnly(['clientId', 'tailorId', 'rating', 'comment', 'createdAt'])
+        && isValidId(data.clientId)
+        && isValidId(data.tailorId)
+        && data.rating is number && data.rating >= 1 && data.rating <= 5
+        && data.comment is string && data.comment.size() <= 1000
+        && data.get('createdAt', request.time) == request.time;
+    }
+
+
+    // rules
+    match /users/{userId}/profiles/main {
+      allow get: if isSignedIn() && isValidId(userId);
+      allow list: if isSignedIn(); // Safe to list public profiles (discovery)
+      
+      allow create: if isSignedIn() 
+        && userId == request.auth.uid 
+        && isValidPublicProfile(incoming())
+        && incoming().createdAt == request.time;
+        
+      allow update: if isSignedIn()
+        && userId == request.auth.uid
+        && isValidPublicProfile(incoming())
+        && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'bio', 'avatarUrl', 'portfolioUrls', 'services', 'updatedAt'])
+        && incoming().updatedAt == request.time;
+    }
+
+    match /users/{userId}/private/info {
+      allow get: if isSignedIn() && userId == request.auth.uid;
+      // No list
+      allow create: if isSignedIn() 
+        && userId == request.auth.uid 
+        && isValidPrivateInfo(incoming());
+      
+      allow update: if isSignedIn()
+        && userId == request.auth.uid
+        && isValidPrivateInfo(incoming())
+        && incoming().diff(existing()).affectedKeys().hasOnly(['email', 'phone', 'address']);
+    }
+
+    match /orders/{orderId} {
+      allow get: if isSignedIn() && isValidId(orderId) && (existing().clientId == request.auth.uid || existing().tailorId == request.auth.uid);
+      allow list: if isSignedIn() && (resource.data.clientId == request.auth.uid || resource.data.tailorId == request.auth.uid);
+
+      allow create: if isSignedIn()
+        && isValidId(orderId)
+        && isValidOrder(incoming())
+        && incoming().clientId == request.auth.uid
+        && incoming().status == 'pending'
+        && incoming().createdAt == request.time
+        && exists(/databases/$(database)/documents/users/$(incoming().tailorId)/profiles/main);
+
+      allow update: if isSignedIn()
+        && isValidId(orderId)
+        && isValidOrder(incoming())
+        && incoming().clientId == existing().clientId
+        && incoming().tailorId == existing().tailorId
+        && existing().status != 'cancelled'
+        && existing().status != 'completed'
+        && incoming().updatedAt == request.time
+        && (
+           // Client can cancel or change description if pending
+           (existing().clientId == request.auth.uid && existing().status == 'pending' && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'description', 'updatedAt']) && (incoming().status == 'cancelled' || incoming().status == 'pending'))
+           ||
+           // Tailor can update status or price
+           (existing().tailorId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'price', 'updatedAt']))
+        );
+    }
+
+    match /chats/{chatId} {
+      allow get: if isSignedIn() && isValidId(chatId) && request.auth.uid in existing().participants;
+      allow list: if isSignedIn() && request.auth.uid in resource.data.participants;
+
+      allow create: if isSignedIn()
+        && isValidId(chatId)
+        && isValidChat(incoming())
+        && request.auth.uid in incoming().participants
+        && incoming().updatedAt == request.time;
+      
+      allow update: if isSignedIn()
+        && isValidId(chatId)
+        && request.auth.uid in existing().participants
+        && isValidChat(incoming())
+        && incoming().diff(existing()).affectedKeys().hasOnly(['updatedAt'])
+        && incoming().updatedAt == request.time;
+    }
+
+    match /chats/{chatId}/messages/{messageId} {
+      // Must check relation to parent chat safely (cost optimized) -- in this case we must verify membership, which requires a get() on parent because messages don't store participant array. BUT Wait: we can store participants array on Chat and get() it, but better: we just check if it exists in parent Chat.
+      // Alternatively, we use get() on parent. It's safe if bounded.
+      allow get, list: if isSignedIn() && isValidId(chatId) && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
+
+      allow create: if isSignedIn()
+        && isValidId(chatId)
+        && isValidId(messageId)
+        && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants
+        && isValidMessage(incoming())
+        && incoming().senderId == request.auth.uid
+        && incoming().createdAt == request.time;
+    }
+
+    match /reviews/{reviewId} {
+      allow get: if isSignedIn() && isValidId(reviewId);
+      allow list: if isSignedIn(); // Publicly readable for portfolios
+
+      allow create: if isSignedIn()
+        && isValidId(reviewId)
+        && isValidReview(incoming())
+        && incoming().clientId == request.auth.uid
+        && exists(/databases/$(database)/documents/users/$(incoming().tailorId)/profiles/main)
+        && incoming().createdAt == request.time;
+        
+      // Reviews are immutable after creation.
+      allow update, delete: if false;
+    }
+  }
+}
